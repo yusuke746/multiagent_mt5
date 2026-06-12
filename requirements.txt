@@ -1,0 +1,12 @@
+# MT5 & Windows
+MetaTrader5>=5.0.45
+pywin32>=306
+python-dotenv>=1.0.0
+requests>=2.31.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# TradingAgents (多エージェントLLM分析フレームワーク)
+# 初回インストール: pip install "tradingagents @ git+https://github.com/TauricResearch/TradingAgents.git"
+# または git clone 後: pip install ./TradingAgents
+tradingagents @ git+https://github.com/TauricResearch/TradingAgents.git

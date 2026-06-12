@@ -1,0 +1,29 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.pyc
+
+# === 仮想環境 ===
+.venv/
+venv/
+env/
+
+# === 機密情報 ===
+.env
+
+# === DB / ログ ===
+*.db
+*.db-wal
+*.db-shm
+logs/
+*.log
+
+# === IDE ===
+.vscode/settings.json
+.idea/
+
+# === TradingAgents キャッシュ / メモリ ===
+.tradingagents/
