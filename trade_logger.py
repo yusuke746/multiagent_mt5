@@ -160,7 +160,7 @@ def run_maintenance(full_vacuum: bool = False):
                      (SELECT id FROM heartbeats ORDER BY id DESC LIMIT ?)""",
                   (config.DB_MAX_HEARTBEAT_ROWS,))
 
-        c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        c.execute("PRAGMA wal_checkpoint(PASSIVE)")
 
     if full_vacuum:
         with _conn() as c:

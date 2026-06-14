@@ -48,6 +48,22 @@ CURRENCY_GROUPS: dict[str, list[str]] = {
     "OILCash":   ["USD"],
     "BTCUSD":    ["BTC"],
     "ETHUSD":    ["ETH"],
+    # 米国株個別銘柄 (XM MT5シンボル名 = 会社名形式)
+    "Apple":               ["US_STOCK"],
+    "AdvMicroDev":         ["US_STOCK"],
+    "Arm Holdings":        ["US_STOCK"],
+    "Broadcom":            ["US_STOCK"],
+    "Coinbase":            ["US_STOCK"],
+    "Salesforce":          ["US_STOCK"],
+    "Crowdstrike":         ["US_STOCK"],
+    "Google":              ["US_STOCK"],
+    "Facebook":            ["US_STOCK"],
+    "Microsoft":           ["US_STOCK"],
+    "Netflix":             ["US_STOCK"],
+    "Nvidia":              ["US_STOCK"],
+    "Palantir":            ["US_STOCK"],
+    "Super Micro Computer":["US_STOCK"],
+    "Taiwan-Semiconductor":["US_STOCK"],
 }
 
 # ──────────────────────────────────────
@@ -71,6 +87,23 @@ ENTRY_SL_ATR_MULT_BY_SYMBOL: dict[str, float] = {
     "USDJPY":    float(os.getenv("ENTRY_SL_ATR_MULT_USDJPY",    "1.5")),
     "EURUSD":    float(os.getenv("ENTRY_SL_ATR_MULT_EURUSD",    "1.5")),
     "BTCUSD":    float(os.getenv("ENTRY_SL_ATR_MULT_BTCUSD",    "2.5")),
+    # 米国株個別銘柄 (XM MT5シンボル名 = 会社名形式)
+    # 個別株はボラが大きいため 2.0 (デフォルト1.5より広め)
+    "Nvidia":              float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "AdvMicroDev":         float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Microsoft":           float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Apple":               float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Google":              float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Facebook":            float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Salesforce":          float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Palantir":            float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Arm Holdings":        float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Broadcom":            float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Taiwan-Semiconductor":float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Coinbase":            float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Crowdstrike":         float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Netflix":             float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
+    "Super Micro Computer":float(os.getenv("ENTRY_SL_ATR_MULT_US_STOCK", "2.0")),
 }
 
 # TP = SL距離 × R倍率
@@ -138,6 +171,22 @@ EMERGENCY_EXIT_ADVERSE_ATR_BY_SYMBOL: dict[str, float] = {
     "USDJPY":    2.0,
     "EURUSD":    2.0,
     "BTCUSD":    3.0,
+    # 米国株個別銘柄 (ギャップ・急騰急落リスクを考慮して広め)
+    "Nvidia":              2.5,
+    "AdvMicroDev":         2.5,
+    "Microsoft":           2.5,
+    "Apple":               2.5,
+    "Google":              2.5,
+    "Facebook":            2.5,
+    "Salesforce":          2.5,
+    "Palantir":            3.0,
+    "Arm Holdings":        3.0,
+    "Broadcom":            2.5,
+    "Taiwan-Semiconductor":3.0,
+    "Coinbase":            3.0,
+    "Crowdstrike":         2.5,
+    "Netflix":             2.5,
+    "Super Micro Computer":3.0,
 }
 
 # ──────────────────────────────────────
@@ -210,6 +259,31 @@ DB_MAX_AI_LOG_ROWS           = int(os.getenv("DB_MAX_AI_LOG_ROWS",           "50
 DB_MAX_HEARTBEAT_ROWS        = int(os.getenv("DB_MAX_HEARTBEAT_ROWS",        "2000"))
 
 # ──────────────────────────────────────
+# 週次スクリーニング設定
+# ──────────────────────────────────────
+# 毎週月曜日に WEEKLY_UNIVERSE をスクリーニングし、今週の監視銘柄を自動選定する。
+# 選定結果は config.SYMBOLS をメモリ上で更新し、H1スレッドが自動ピックアップする。
+WEEKLY_SCREENING_ENABLED = os.getenv("WEEKLY_SCREENING_ENABLED", "true").lower() == "true"
+
+# 監視ユニバース (yfinanceティッカーで指定)
+# MT5シンボルではなく yfinance ティッカーで記述すること
+WEEKLY_UNIVERSE: list[str] = [
+    s.strip()
+    for s in os.getenv(
+        "WEEKLY_UNIVERSE",
+        # yfinance ティッカーで指定 (SHOP は XM未確認のため除外)
+        "NVDA,AMD,MSFT,AAPL,GOOGL,META,CRM,PLTR,ARM,AVGO,TSM,COIN,CRWD,NFLX,SMCI",
+    ).split(",")
+    if s.strip()
+]
+
+# TradingAgents に渡す候補数 (1銘柄あたり約 $0.05〜0.15 / 週)
+WEEKLY_SCREENER_TOP_N = int(os.getenv("WEEKLY_SCREENER_TOP_N", "3"))
+
+# スクリーニング実行曜日 (0=月曜, 1=火曜, ..., 6=日曜)
+WEEKLY_SCREENING_DOW = int(os.getenv("WEEKLY_SCREENING_DOW", "0"))
+
+# ──────────────────────────────────────
 # ログ / ループ設定
 # ──────────────────────────────────────
 LOG_DIR                = os.path.join(_CURRENT_DIR, "logs")
@@ -233,3 +307,6 @@ REENTRY_ADX_PERIOD    = int(os.getenv("REENTRY_ADX_PERIOD",    "14"))
 REENTRY_ADX_THRESHOLD = float(os.getenv("REENTRY_ADX_THRESHOLD", "25"))
 REENTRY_EMA_FAST      = int(os.getenv("REENTRY_EMA_FAST",  "5"))
 REENTRY_EMA_SLOW      = int(os.getenv("REENTRY_EMA_SLOW", "20"))
+
+# Overweight 買い増し時のロット倍率 (通常エントリーに対する割合)
+OVERWEIGHT_LOT_MULT = float(os.getenv("OVERWEIGHT_LOT_MULT", "0.5"))

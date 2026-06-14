@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TASignal:
     """TradingAgents が返した分析シグナル"""
-    direction:     str       # "BUY" | "SELL" | "NEUTRAL"
+    direction:     str       # 強い新規方向のみ: "BUY" | "SELL" | "NEUTRAL"
     rating:        str       # "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell"
     reasoning:     str       # 分析サマリー (PortfolioManager の final_trade_decision)
     yf_ticker:     str       # 分析に使用した yfinance ティッカー
@@ -221,15 +221,15 @@ class TAAnalyzer:
 
     @staticmethod
     def _map_rating(rating: str) -> str:
-        """5段階レーティングを BUY / SELL / NEUTRAL に変換する。
+        """5段階レーティングのうち強い方向のみを BUY / SELL / NEUTRAL に変換する。
 
         TradingAgents の SignalProcessor.process_signal() が返す文字列:
           "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell"
         """
         r = str(rating).strip().lower()
-        if any(kw in r for kw in ("buy", "overweight")):
+        if r == "buy":
             return "BUY"
-        if any(kw in r for kw in ("sell", "underweight")):
+        if r == "sell":
             return "SELL"
         return "NEUTRAL"
 

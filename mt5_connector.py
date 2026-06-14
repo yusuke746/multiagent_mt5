@@ -465,12 +465,18 @@ def modify_position_sl(ticket: int, new_sl: float) -> bool:
         "magic":    202605,
     }
     result = mt5.order_send(request)
-    if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-        err = result.comment if result else "None"
-        logger.error("SL更新失敗: ticket=%s new_sl=%.5f err=%s", ticket, new_sl, err)
+    if result is None:
+        logger.error("SL更新失敗: ticket=%s new_sl=%.5f err=None", ticket, new_sl)
         return False
-    logger.info("SL更新成功: ticket=%s new_sl=%.5f", ticket, new_sl)
-    return True
+    # 10025 = TRADE_RETCODE_NO_CHANGES: SLがすでに同値 → 実質成功
+    if result.retcode == mt5.TRADE_RETCODE_DONE or result.retcode == 10025:
+        if result.retcode == 10025:
+            logger.info("SL更新: ticket=%s new_sl=%.5f (既に同値)", ticket, new_sl)
+        else:
+            logger.info("SL更新成功: ticket=%s new_sl=%.5f", ticket, new_sl)
+        return True
+    logger.error("SL更新失敗: ticket=%s new_sl=%.5f err=%s", ticket, new_sl, result.comment)
+    return False
 
 
 # ── サーバー時刻 / 市場開閉判定 ──────────

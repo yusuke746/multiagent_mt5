@@ -115,3 +115,43 @@ def send_skip(symbol: str, reason: str, notify: bool = False):
         "timestamp": datetime.utcnow().isoformat(),
     }
     _send(embeds=[embed])
+
+
+def send_weekly_screening(
+    selected: dict,
+    all_results: list[dict],
+    analysis_date: str,
+    prev_symbols: list[str],
+) -> None:
+    """週次スクリーニング結果の通知"""
+    mt5_symbol = selected.get("mt5_symbol", selected.get("ticker", "N/A"))
+    action     = selected.get("action", "N/A")
+    score      = selected.get("score", 0.0)
+    momentum   = selected.get("momentum_20d", 0.0)
+    rsi        = selected.get("rsi", 0.0)
+    price      = selected.get("price", 0.0)
+
+    candidates_text = "\n".join(
+        f"  • {r.get('mt5_symbol', r.get('ticker', '?'))}: "
+        f"{r.get('action', 'N/A')} (score: {r.get('score', 0.0):.4f})"
+        for r in all_results
+    )
+
+    color = 0x00FF88 if "BUY" in action or action == "OVERWEIGHT" else 0xAAAAAA
+    embed = {
+        "title": f"📅 週次監視銘柄 決定 ({analysis_date} 週)",
+        "color": color,
+        "fields": [
+            {"name": "🎯 今週の監視銘柄",   "value": f"**{mt5_symbol}**",     "inline": True},
+            {"name": "📊 シグナル",          "value": f"**{action}**",         "inline": True},
+            {"name": "💰 現在価格",          "value": f"${price:.2f}",         "inline": True},
+            {"name": "📈 20日モメンタム",    "value": f"{momentum:+.1f}%",     "inline": True},
+            {"name": "⚡ RSI",               "value": f"{rsi:.1f}",            "inline": True},
+            {"name": "🔢 スクリーナースコア","value": f"{score:.4f}",          "inline": True},
+            {"name": "📋 候補銘柄分析",      "value": candidates_text or "N/A","inline": False},
+            {"name": "⚙️ 前週銘柄",         "value": ", ".join(prev_symbols) or "N/A", "inline": False},
+        ],
+        "footer": {"text": "Weekly Screener → multiagent_mt5"},
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    _send(embeds=[embed])

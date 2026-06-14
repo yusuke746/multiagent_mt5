@@ -26,7 +26,8 @@ import discord_notifier
 import trade_logger
 import market_stress
 import symbol_map
-from ta_analyzer import TAAnalyzer
+import weekly_screener
+from ta_analyzer import TAAnalyzer, TASignal
 
 # ── ログ設定 ────────────────────────────
 
@@ -62,6 +63,15 @@ _analysis_lock = threading.Lock()
 # シグナルキャッシュ時点のMT5参照価格 (乖離フィルター用)
 _signal_ref_price: dict[str, float] = {}
 
+# Underweight 縮小を同一H1シグナルで多重実行しないための記録
+_last_underweight_reduction_at: dict[str, datetime] = {}
+
+# Overweight 買い増しを同一H1シグナルで多重実行しないための記録
+_last_overweight_add_at: dict[str, datetime] = {}
+
+# 週次スクリーニング実行済のISO週番号 (None = 未実行)
+_last_screening_isoweek: int | None = None
+
 
 # ── H1 バックグラウンドスレッド ──────────
 
@@ -82,6 +92,8 @@ def _h1_analysis_loop():
                     _ta.clear_cache()
                 _signal_ref_price.clear()
                 _last_entry_bar.clear()
+                _last_underweight_reduction_at.clear()
+                _last_overweight_add_at.clear()
                 logger.info("[H1] 市場クローズ: TAシグナルキャッシュ・基準価格・クールダウンをクリア")
                 cache_cleared_on_close = True
             _stop_event.wait(timeout=300)  # 5分待機してから再チェック
@@ -116,7 +128,8 @@ def _h1_analysis_loop():
                 last_run[symbol] = now
 
                 # 分析完了時点のMT5価格を基準価格として保存 (乖離フィルター用)
-                if signal and signal.is_directional():
+                signal_rating = str(signal.rating).strip().lower() if signal else ""
+                if signal and signal_rating in ("buy", "sell", "overweight"):
                     ref_info = mt5_connector.get_current_price(symbol)
                     if ref_info:
                         mid = (ref_info["bid"] + ref_info["ask"]) / 2
@@ -175,6 +188,8 @@ def _process_exit(pos: dict):
     # ── 利益保護: SL引き上げ ──
     if config.PROFIT_PROTECTION_ENABLED and db_trade:
         _apply_profit_protection(pos, db_trade)
+    elif config.PROFIT_PROTECTION_ENABLED and db_trade is None:
+        logger.warning("[ProfitProtect] %s ticket=%s: DB未登録 → SL管理スキップ", symbol, ticket)
 
     # ── 市場クローズ前強制手仕舞い ──
     if _should_session_close(symbol):
@@ -278,17 +293,15 @@ def _should_signal_flip_exit(pos: dict) -> bool:
         return False
     symbol    = pos["symbol"].rstrip("#.")   # KIWAMI口座など "#" suffix を除去してキャッシュキーと統一
     direction = pos["type"]  # "BUY" or "SELL"
-    cached    = _ta.get_cached_direction(symbol)
-
-    if cached == "NEUTRAL" and config.TA_EXIT_ON_SIGNAL_NEUTRAL:
-        logger.info("[SignalFlip] %s ticket=%s: NEUTRAL → exit", symbol, pos["ticket"])
-        return True
+    signal = _ta.get_cached_signal(symbol)
+    if signal is None:
+        return False
 
     if config.TA_EXIT_ON_SIGNAL_FLIP:
-        if direction == "BUY" and cached == "SELL":
+        if direction == "BUY" and signal.direction == "SELL":
             logger.info("[SignalFlip] %s ticket=%s: BUY→SELL反転 → exit", symbol, pos["ticket"])
             return True
-        if direction == "SELL" and cached == "BUY":
+        if direction == "SELL" and signal.direction == "BUY":
             logger.info("[SignalFlip] %s ticket=%s: SELL→BUY反転 → exit", symbol, pos["ticket"])
             return True
     return False
@@ -309,10 +322,14 @@ def _apply_profit_protection(pos: dict, db_trade: dict):
     if sl_dist <= 0:
         return
 
+    # シンボル精度取得 (丸め誤差対策)
+    sym_info = mt5_connector.get_symbol_info(pos["symbol"])
+    digits   = sym_info["digits"] if sym_info else 5
+    tick_size = 10 ** (-digits)  # 比較閾値として使用
+
     def calc_new_sl(lock_r: float) -> float:
-        if direction == "BUY":
-            return entry_price + sl_dist * lock_r
-        return entry_price - sl_dist * lock_r
+        raw = entry_price + sl_dist * lock_r if direction == "BUY" else entry_price - sl_dist * lock_r
+        return round(raw, digits)
 
     current_price = pos["price_current"]
     if direction == "BUY":
@@ -320,32 +337,37 @@ def _apply_profit_protection(pos: dict, db_trade: dict):
     else:
         progress_r = (entry_price - current_price) / sl_dist
 
+    logger.info("[ProfitProtect] %s ticket=%s dir=%s progress_r=%.3f current_sl=%.5f entry=%.5f sl_dist=%.5f",
+                pos["symbol"], pos["ticket"], direction, progress_r, current_sl, entry_price, sl_dist)
+
     new_sl: float | None = None
 
     if progress_r >= config.LOCK_PROFIT_3_TRIGGER_R:
         candidate = calc_new_sl(config.LOCK_PROFIT_3_R)
-        if direction == "BUY" and candidate > current_sl + 0.0001:
+        if direction == "BUY" and candidate > current_sl + tick_size:
             new_sl = candidate
-        elif direction == "SELL" and candidate < current_sl - 0.0001:
+        elif direction == "SELL" and candidate < current_sl - tick_size:
             new_sl = candidate
     elif progress_r >= config.LOCK_PROFIT_2_TRIGGER_R:
         candidate = calc_new_sl(config.LOCK_PROFIT_2_R)
-        if direction == "BUY" and candidate > current_sl + 0.0001:
+        if direction == "BUY" and candidate > current_sl + tick_size:
             new_sl = candidate
-        elif direction == "SELL" and candidate < current_sl - 0.0001:
+        elif direction == "SELL" and candidate < current_sl - tick_size:
             new_sl = candidate
     elif progress_r >= config.LOCK_PROFIT_1_TRIGGER_R:
         candidate = calc_new_sl(config.LOCK_PROFIT_1_R)
-        if direction == "BUY" and candidate > current_sl + 0.0001:
+        if direction == "BUY" and candidate > current_sl + tick_size:
             new_sl = candidate
-        elif direction == "SELL" and candidate < current_sl - 0.0001:
+        elif direction == "SELL" and candidate < current_sl - tick_size:
             new_sl = candidate
     elif progress_r >= config.BREAKEVEN_R:
-        be_sl = entry_price + (sl_dist * config.BREAKEVEN_BUFFER_R if direction == "BUY"
-                               else -sl_dist * config.BREAKEVEN_BUFFER_R)
-        if direction == "BUY" and be_sl > current_sl + 0.0001:
+        be_sl = calc_new_sl(config.BREAKEVEN_BUFFER_R if direction == "BUY" else -config.BREAKEVEN_BUFFER_R)
+        # BUYはBEをSELL方向に: entry + buffer。SELLはentry - buffer
+        be_sl = round(entry_price + sl_dist * config.BREAKEVEN_BUFFER_R if direction == "BUY"
+                      else entry_price - sl_dist * config.BREAKEVEN_BUFFER_R, digits)
+        if direction == "BUY" and be_sl > current_sl + tick_size:
             new_sl = be_sl
-        elif direction == "SELL" and be_sl < current_sl - 0.0001:
+        elif direction == "SELL" and be_sl < current_sl - tick_size:
             new_sl = be_sl
 
     if new_sl is not None:
@@ -421,6 +443,69 @@ def _check_entries(m15_bar_index: int):
             discord_notifier.send_error(f"エントリーチェック例外: {symbol}", str(e))
 
 
+def _normalize_ta_rating(rating: str) -> str:
+    return str(rating).strip().lower()
+
+
+def _get_symbol_positions(symbol: str) -> list[dict]:
+    base_symbol = symbol.rstrip("#.")
+    return [
+        p for p in mt5_connector.get_positions()
+        if p["symbol"].rstrip("#.") == base_symbol
+    ]
+
+
+def _resolve_entry_direction(signal: TASignal, symbol_positions: list[dict]) -> str | None:
+    """レーティングと保有状況からエントリー方向を決定する (ロング専用モード)。
+
+    Buy        : ロングなし → 新規エントリー / ロングあり → 買い増し (H1シグナルごと1回)
+    Overweight : 既存ロングへの追加 (H1シグナルごと1回)
+    Hold       : 維持のみ → None
+    Underweight: 縮小対象 → None (別途 _maybe_reduce_underweight で処理)
+    Sell       : 全クローズ → None (エグジット側 / _should_signal_flip_exit で処理)
+    """
+    rating = _normalize_ta_rating(signal.rating)
+    long_positions = [p for p in symbol_positions if p["type"] == "BUY"]
+    if rating == "buy":
+        return "BUY"  # 既存なし→新規 / 既存あり→買い増し (throttleは_check_entry側で管理)
+    if rating == "overweight":
+        if long_positions:
+            return "BUY"
+    return None
+
+
+def _maybe_reduce_underweight(symbol: str, signal: TASignal, symbol_positions: list[dict]) -> None:
+    if _normalize_ta_rating(signal.rating) != "underweight":
+        return
+
+    last_handled = _last_underweight_reduction_at.get(symbol)
+    if last_handled is not None and last_handled >= signal.timestamp:
+        return
+
+    if len(symbol_positions) <= 1:
+        logger.info("[Underweight] %s: 単一ポジション以下のため縮小せず維持", symbol)
+        _last_underweight_reduction_at[symbol] = signal.timestamp
+        return
+
+    existing_dirs = {p["type"] for p in symbol_positions}
+    if len(existing_dirs) != 1:
+        logger.info("[Underweight] %s: 保有方向が混在しているため縮小スキップ", symbol)
+        _last_underweight_reduction_at[symbol] = signal.timestamp
+        return
+
+    reduce_pos = max(symbol_positions, key=lambda p: p["ticket"])
+    db_trade = trade_logger.get_trade_by_ticket(reduce_pos["ticket"])
+    logger.info(
+        "[Underweight] %s: %s ticket=%s を1本縮小",
+        symbol, reduce_pos["type"], reduce_pos["ticket"],
+    )
+    _close_and_log(reduce_pos, "UNDERWEIGHT_REDUCE", db_trade)
+
+    remaining_tickets = {p["ticket"] for p in _get_symbol_positions(symbol)}
+    if reduce_pos["ticket"] not in remaining_tickets:
+        _last_underweight_reduction_at[symbol] = signal.timestamp
+
+
 def _check_entry(symbol: str, m15_bar_index: int):
     # ── 事前チェック: 市場・TA分析可否 ──
     if not mt5_connector.is_symbol_market_active(symbol):
@@ -429,6 +514,11 @@ def _check_entry(symbol: str, m15_bar_index: int):
 
     if not mt5_connector.is_fx_market_open():
         logger.info("[Entry] %s: FX市場クローズ中 → スキップ", symbol)
+        return
+
+    # SESSION_CLOSE直後の即再エントリーを防ぐ
+    if _should_session_close(symbol):
+        logger.info("[Entry] %s: セッションクローズ期間中 → スキップ", symbol)
         return
 
     # キャッシュシグナル取得
@@ -441,11 +531,37 @@ def _check_entry(symbol: str, m15_bar_index: int):
         logger.info("[Entry] %s: TAキャッシュなし / 期限切れ → スキップ", symbol)
         return
 
-    if not signal.is_directional():
-        logger.info("[Entry] %s: NEUTRAL → スキップ", symbol)
+    symbol_positions = _get_symbol_positions(symbol)
+    _maybe_reduce_underweight(symbol, signal, symbol_positions)
+    symbol_positions = _get_symbol_positions(symbol)
+
+    direction = _resolve_entry_direction(signal, symbol_positions)
+    if direction is None:
+        rating = _normalize_ta_rating(signal.rating)
+        if rating == "hold":
+            logger.info("[Entry] %s: Hold → 維持のみ / 新規なし", symbol)
+        elif rating == "underweight":
+            logger.info("[Entry] %s: Underweight → 縮小/見送り", symbol)
+        elif rating == "overweight":
+            logger.info("[Entry] %s: Overweight だが既存ロングなし → 新規なし", symbol)
+        elif rating == "sell":
+            logger.info("[Entry] %s: Sell → ロング全クローズ (エグジット側で処理)", symbol)
+        else:
+            logger.info("[Entry] %s: 非エントリー評価(%s) → スキップ", symbol, signal.rating)
         return
 
-    direction = signal.direction
+    # ── 買い増しゲート: Buy(既存あり) / Overweight → 同一H1シグナルで1回のみ ──
+    rating = _normalize_ta_rating(signal.rating)
+    existing_long_positions = [p for p in symbol_positions if p["type"] == "BUY"]
+    is_pyramid_add = (rating == "overweight") or (rating == "buy" and len(existing_long_positions) > 0)
+    if is_pyramid_add:
+        last_ow = _last_overweight_add_at.get(symbol)
+        if last_ow is not None and last_ow >= signal.timestamp:
+            logger.info(
+                "[Entry] %s: 買い増し(%s)は今回H1シグナル(%s)で実施済み → スキップ",
+                symbol, signal.rating, signal.timestamp.strftime("%H:%M"),
+            )
+            return
 
     # ── クールダウン ──
     last_bar = _last_entry_bar.get(symbol, -999)
@@ -457,10 +573,7 @@ def _check_entry(symbol: str, m15_bar_index: int):
     # ── 積み増し ADX+EMAトレンドフィルター ──
     # 同方向ポジションが既にある場合（積み増し）: ADX閾値以上かつEMAクロスが合致している場合のみ許可
     if config.REENTRY_TREND_FILTER:
-        same_dir_positions = [
-            p for p in mt5_connector.get_positions()
-            if p["symbol"].rstrip("#.") == symbol and p["type"] == direction
-        ]
+        same_dir_positions = [p for p in symbol_positions if p["type"] == direction]
         if same_dir_positions:
             needed = max(config.REENTRY_ADX_PERIOD, config.REENTRY_EMA_SLOW) * 3
             df_trend = mt5_connector.get_rates(symbol, "M15", needed)
@@ -574,6 +687,12 @@ def _check_entry(symbol: str, m15_bar_index: int):
         market_stress.consume_post_recovery_trade(symbol)
         logger.info("[Entry] %s: 復帰後慎重モード → lot縮小 (×%.1f)", symbol, lot_mult)
 
+    # 買い増し(Buy満起およびOverweight)はロットを縮小 (OVERWEIGHT_LOT_MULT 倍)
+    if is_pyramid_add:
+        vol_min = (mt5_connector.get_symbol_info(symbol) or {}).get("volume_min", 0.01)
+        lot = max(vol_min, round(lot * config.OVERWEIGHT_LOT_MULT, 2))
+        logger.info("[Entry] %s: Overweight買い増し → lot縮小 (×%.1f → %.2f)", symbol, config.OVERWEIGHT_LOT_MULT, lot)
+
     # ── 注文発行 ──
     logger.info("[Entry] %s %s: entry=%.5f SL=%.5f TP=%.5f lot=%.2f ATR=%.5f rating=%s",
                 symbol, direction, entry_price, sl, tp, lot, atr, signal.rating)
@@ -605,6 +724,9 @@ def _check_entry(symbol: str, m15_bar_index: int):
         rating=signal.rating,
     )
     _last_entry_bar[symbol] = m15_bar_index
+    # エントリー成功時は常に _last_overweight_add_at を更新する
+    # (Buy新規含む: 同一H1サイクル内で次のM15に再びエントリーしないよう封鎖)
+    _last_overweight_add_at[symbol] = signal.timestamp
 
 
 # ── DB メンテナンス ──────────────────────
@@ -630,6 +752,44 @@ def _send_heartbeat():
         discord_notifier.send_heartbeat(balance, equity, open_positions, dd_pct)
     logger.info("[Heartbeat] balance=%.0f equity=%.0f positions=%d DD=%.1f%%",
                 balance, equity, open_positions, dd_pct)
+
+
+# ── 週次スクリーニング ────────────────────
+
+def _maybe_run_weekly_screening() -> None:
+    """月曜日に週次スクリーニングを実行する (1週間に1回)。"""
+    global _last_screening_isoweek
+
+    if not config.WEEKLY_SCREENING_ENABLED:
+        return
+
+    now = datetime.now()
+    # WEEKLY_SCREENING_DOW: 0=月曜 … 6=日曜 (Python weekday)
+    if now.weekday() != config.WEEKLY_SCREENING_DOW:
+        return
+
+    current_week = now.isocalendar()[1]
+    if _last_screening_isoweek == current_week:
+        return  # 今週は実行済み
+
+    if _ta is None:
+        logger.warning("[WeeklyScreening] TAAnalyzerが未初期化のためスキップ")
+        return
+
+    logger.info("[WeeklyScreening] 週次スクリーニング開始 (week=%d)", current_week)
+    try:
+        selected = weekly_screener.run_weekly_screening(_ta)
+        _last_screening_isoweek = current_week
+        if selected:
+            # シンボル変更に伴うキャッシュ・状態をリセット
+            _ta.clear_cache()
+            _signal_ref_price.clear()
+            _last_entry_bar.clear()
+            _last_underweight_reduction_at.clear()
+            _last_overweight_add_at.clear()
+            logger.info("[WeeklyScreening] 監視銘柄変更 → キャッシュリセット完了")
+    except Exception as e:
+        logger.error("[WeeklyScreening] 例外: %s", e, exc_info=True)
 
 
 # ── 起動時チェック ──────────────────────
@@ -689,6 +849,9 @@ def main():
 
     _startup_check()
 
+    # 週次スクリーニング (月曜起動時)
+    _maybe_run_weekly_screening()
+
     last_heartbeat    = datetime.now()
     last_db_maint     = datetime.now()
     last_full_vacuum  = datetime.now()
@@ -702,6 +865,7 @@ def main():
             # ── Heartbeat (1時間ごと) ──
             if (now - last_heartbeat).total_seconds() >= config.HEARTBEAT_INTERVAL_SEC:
                 _send_heartbeat()
+                _maybe_run_weekly_screening()  # 月曜の毎時チェック
                 last_heartbeat = now
 
             # ── DB メンテナンス ──

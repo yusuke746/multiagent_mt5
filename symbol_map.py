@@ -40,6 +40,25 @@ _SYMBOL_TO_YF: dict[str, str] = {
     # 暗号資産
     "BTCUSD":    "BTC-USD",
     "ETHUSD":    "ETH-USD",
+
+    # 米国株 個別銘柄 (XM Trading の MT5シンボル名 = 会社名形式)
+    "Apple":               "AAPL",
+    "AdvMicroDev":         "AMD",
+    "Arm Holdings":        "ARM",
+    "Broadcom":            "AVGO",
+    "Coinbase":            "COIN",
+    "Salesforce":          "CRM",
+    "Crowdstrike":         "CRWD",
+    "Google":              "GOOGL",
+    "Facebook":            "META",
+    "Microsoft":           "MSFT",
+    "Netflix":             "NFLX",
+    "Nvidia":              "NVDA",
+    "Palantir":            "PLTR",
+    "Super Micro Computer":"SMCI",
+    "Taiwan-Semiconductor":"TSM",
+    # Shopify は XMでの存在未確認のためコメントアウト
+    # "Shopify":           "SHOP",
 }
 
 # yfinance ティッカー の asset_type
@@ -67,7 +86,29 @@ _YF_ASSET_TYPE: dict[str, str] = {
     "UNG":      "stock",
     "BTC-USD":  "crypto",
     "ETH-USD":  "crypto",
+
+    # 米国株 個別銘柄
+    "NVDA":   "stock",
+    "AMD":    "stock",
+    "MSFT":   "stock",
+    "AAPL":   "stock",
+    "GOOGL":  "stock",
+    "META":   "stock",
+    "CRM":    "stock",
+    "PLTR":   "stock",
+    "ARM":    "stock",
+    "AVGO":   "stock",
+    "TSM":    "stock",
+    "COIN":   "stock",
+    "SHOP":   "stock",
+    "CRWD":   "stock",
+    "NFLX":   "stock",
+    "SMCI":   "stock",
 }
+
+# yfinance ティッカー → MT5シンボル名 (逆引き)
+# weekly_ta_screener から multiagent_mt5 の SYMBOLS を更新する際に使用
+YF_TO_MT5: dict[str, str] = {v: k for k, v in _SYMBOL_TO_YF.items()}
 
 
 def get_yf_ticker(mt5_symbol: str) -> str | None:
