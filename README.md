@@ -28,11 +28,78 @@ Copy-Item .env.example .env
 
 ## 実行
 
+システムは **1 回の起動で 1 サイクル（分析→発注→通知）を実行して終了する**バッチ型。
+常駐プロセスではないため、日次の起動は Windows タスクスケジューラで行う。
+
+### 手動起動（動作確認・臨時実行）
+
 ```powershell
-python scheduler.py
+cd multiagent_mt5
+C:\Python313\python.exe scheduler.py
 ```
 
-日本時間 早朝 6:00 に Windows タスクスケジューラ等で `scheduler.py` を起動する想定。
+または本番と同じ経路で確認する場合はランナー経由で起動する：
+
+```powershell
+cd multiagent_mt5
+.\run_cycle.bat
+```
+
+### 起動タイミング（米国セッション中）
+
+米国レギュラーセッションは 9:30–16:00 ET。日本時間では夏冬で 1 時間ずれる。
+
+| 期間      | 米セッション（JST） |
+| --------- | ------------------- |
+| 夏（EDT） | 22:30 – 翌 5:00    |
+| 冬（EST） | 23:30 – 翌 6:00    |
+
+新規エントリーを成立させるには**市場オープン中**に実行する必要がある
+（クローズ中はスプレッド/ATR フィルタで screener が全銘柄を除外＝正常動作だが新規は建たない）。
+夏冬いずれも寄り付き後でセッション内となる **JST 0:30** を既定の起動時刻とする。
+米 月〜金セッションを拾うため、JST では **火〜土** に起動する。
+
+> 分析の基準日 `trade_date` は起動時刻ではなく `market_clock.last_completed_us_trading_day()`
+> が返す「直近に確定した米取引日」を使うため、夏冬時間は自動で吸収される。
+
+### 本番環境でのタスクスケジューラ登録
+
+管理者権限の PowerShell で以下を実行する（`run_cycle.bat` は python 実体パスとログ追記を内包）。
+
+```powershell
+$action    = New-ScheduledTaskAction  -Execute "C:\path\to\multiagent_mt5\run_cycle.bat"
+$trigger   = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday,Wednesday,Thursday,Friday,Saturday -At 00:30
+$settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable `
+             -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
+             -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName "TA_XM_AutoTrade" -Action $action -Trigger $trigger `
+    -Settings $settings -Principal $principal `
+    -Description "TradingAgents x XMTrading US-stock CFD daily cycle (JST 0:30 Tue-Sat)" -Force
+```
+
+登録確認・手動実行・削除：
+
+```powershell
+Get-ScheduledTask     -TaskName "TA_XM_AutoTrade"          # 状態確認（State=Ready）
+Get-ScheduledTaskInfo -TaskName "TA_XM_AutoTrade"          # 次回実行時刻 NextRunTime
+Start-ScheduledTask   -TaskName "TA_XM_AutoTrade"          # 手動で即時実行
+Unregister-ScheduledTask -TaskName "TA_XM_AutoTrade" -Confirm:$false  # 削除
+```
+
+### 本番運用の前提・注意
+
+- **PC 起動・ログオン状態**：`Interactive` 実行のため、起動時刻に PC が稼働しログオン中である必要がある。
+  常時運用ではスリープを無効化する（`powercfg /change standby-timeout-ac 0`）。
+  無人サーバーで走らせる場合は `-LogonType S4U`（パスワード保存不要）や
+  「ユーザーがログオンしているかどうかにかかわらず実行」への変更を検討する。
+- **MT5 ターミナル**：`.env` の `MT5_PATH` を設定しておけば `initialize()` が自動起動する。
+  確実を期すなら常時起動しておく。デモ→本番切替時は口座番号・サーバー名・パスワードを差し替える。
+- **ログ**：起動/終了は `logs\scheduler_run.log`、詳細は `logs\` の日次ログに出力。
+  結果サマリは Discord Webhook に通知される。
+- **多重起動抑止**：`-MultipleInstances IgnoreNew` により前サイクル未終了時の重複起動を防ぐ。
+- **本番移行チェック**：`.env` を本番口座に更新し、`config/risk.yaml` のリスク値・
+  サーキットブレーカー閾値を運用方針に合わせて再確認する。
 
 ## 処理フロー（1サイクル）
 
@@ -59,6 +126,7 @@ core/       mt5_client, market_data, portfolio_state, screener,
 data/       signal_history.json / position_meta.json（実行時生成・gitignore）
 logs/       日次ログ（gitignore）
 scheduler.py, logger.py, notifier.py
+run_cycle.bat  タスクスケジューラから呼ぶ 1 サイクル実行ランナー
 ```
 
 ## 重要な設計上の注意（Phase 0 確定事実）
