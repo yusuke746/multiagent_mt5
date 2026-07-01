@@ -1,0 +1,2 @@
+# このディレクトリは実行時の状態ファイル（signal_history.json / position_meta.json）を保持します。
+# 実データは .gitignore により除外されます。

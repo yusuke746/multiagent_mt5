@@ -1,0 +1,136 @@
+# XMTradingデモ口座(Server: XMTrading-MT5 3)で mt5.symbols_get() により実在確認済み(Phase 0)。
+# mt5_symbol は会社名。ticker は TradingAgents へ渡す識別子として保持する。
+# volume_min は Phase 0 実測値。ロット丸めは必ず銘柄別の volume_min / volume_step を使うこと。
+# 11 GICSセクターに分散し、同一サブ業種の重複を避けた。
+
+symbols:
+  # --- Information Technology ---
+  - ticker: "NVDA"
+    mt5_symbol: "Nvidia"
+    sector: "information_technology"
+    sub_industry: "semiconductors"
+    volume_min: 0.04
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  - ticker: "MSFT"
+    mt5_symbol: "Microsoft"
+    sector: "information_technology"
+    sub_industry: "software"
+    volume_min: 0.02
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Communication Services ---
+  - ticker: "GOOGL"
+    mt5_symbol: "Google"          # description: Alphabet Inc (GOOG.OQ)
+    sector: "communication_services"
+    sub_industry: "interactive_media"
+    volume_min: 0.03
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Consumer Discretionary ---
+  - ticker: "AMZN"
+    mt5_symbol: "Amazon"
+    sector: "consumer_discretionary"
+    sub_industry: "internet_retail"
+    volume_min: 0.03
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Consumer Staples ---
+  - ticker: "KO"
+    mt5_symbol: "Coca-Cola"
+    sector: "consumer_staples"
+    sub_industry: "beverages"
+    volume_min: 0.11
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  - ticker: "PG"
+    mt5_symbol: "Procter&Gam"     # description: Procter & Gamble Co (PG.N)
+    sector: "consumer_staples"
+    sub_industry: "household_products"
+    volume_min: 0.06
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Health Care ---
+  - ticker: "JNJ"
+    mt5_symbol: "J&J"             # description: Johnson & Johnson (JNJ.N)
+    sector: "health_care"
+    sub_industry: "pharmaceuticals"
+    volume_min: 0.04
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  - ticker: "UNH"
+    mt5_symbol: "UnitedHealth"
+    sector: "health_care"
+    sub_industry: "managed_care"
+    volume_min: 0.03
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Financials ---
+  - ticker: "JPM"
+    mt5_symbol: "JPMorgan"
+    sector: "financials"
+    sub_industry: "banks"
+    volume_min: 0.03
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  - ticker: "V"
+    mt5_symbol: "Visa"
+    sector: "financials"
+    sub_industry: "payments"
+    volume_min: 0.03
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Industrials ---
+  - ticker: "CAT"
+    mt5_symbol: "Caterpillar"
+    sector: "industrials"
+    sub_industry: "machinery"
+    volume_min: 0.02
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Energy ---
+  - ticker: "XOM"
+    mt5_symbol: "ExxonMobil"
+    sector: "energy"
+    sub_industry: "integrated_oil"
+    volume_min: 0.05
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Materials ---
+  - ticker: "LIN"
+    mt5_symbol: "Linde"           # description: Linde PLC (LIN.OQ)
+    sector: "materials"
+    sub_industry: "industrial_gases"
+    volume_min: 0.02
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Utilities ---
+  - ticker: "NEE"
+    mt5_symbol: "NextEra"
+    sector: "utilities"
+    sub_industry: "electric_utility"
+    volume_min: 0.09
+    volume_step: 0.01
+    analysis_interval_days: 3
+
+  # --- Real Estate ---
+  - ticker: "AMT"
+    mt5_symbol: "AmericanTower"
+    sector: "real_estate"
+    sub_industry: "telecom_reit"
+    volume_min: 0.05
+    volume_step: 0.01
+    analysis_interval_days: 3

@@ -1,0 +1,89 @@
+# ==============================
+# ポートフォリオ全体の制約
+# ==============================
+portfolio:
+  max_positions: 6
+  max_positions_per_sector: 3       # やや攻め（監視リストは1セクター最大2だが集中を許容）
+  max_risk_per_trade_pct: 2.5       # やや攻め: 1トレードの最大損失（口座残高に対する%）
+  max_total_risk_pct: 12.0          # やや攻め: 全ポジション合計の最大損失（口座残高に対する%）
+
+# ==============================
+# ストップロス設定
+# ==============================
+stop_loss:
+  atr_period: 14
+  atr_multiplier: 2.0
+  sl_required: true                 # SLなし発注はorder_executorでエラー拒否
+
+# ==============================
+# テイクプロフィット設定
+# ==============================
+take_profit:
+  tp_required: false                # 固定TPは一切使用しない
+  # tp値を指定した発注コードを書いてはいけない
+
+# ==============================
+# トレーリングSL設定
+# ==============================
+trailing:
+  enabled: true
+  update_on_hold: true              # HOLD判定時でも日次でSLを更新する
+  # BUYポジション: new_sl = current_price - (ATR × atr_multiplier)
+  # 更新条件: new_sl > current_sl の場合のみ更新（有利方向のみ）
+  # 禁止: new_sl <= current_sl の場合の更新（絶対に行わない）
+
+# ==============================
+# スケーリング（買い増し）ルール
+# ==============================
+scaling:
+  allow_scale_in: true
+  require_unrealized_profit: true   # 含み益がある場合のみ許可
+  max_total_multiplier: 2.5         # 初回ロットの最大2.5倍まで
+  scale_in_ratio: 0.6               # 買い増しロット = 前回追加ロット × 0.6（逓減）
+  recalculate_sl_on_scale: true     # 買い増し後SLを平均取得単価ベースで再計算
+
+# ==============================
+# サーキットブレーカー
+# ==============================
+circuit_breaker:
+  daily_loss_limit_pct: 5.0         # やや攻め（per_trade 2.5%×約2トレード分）
+  weekly_loss_limit_pct: 10.0       # やや攻め
+  min_margin_level_pct: 300.0
+
+# ==============================
+# シグナルゲート（v3.2：confidence廃止 → レーティング階層ゲート）
+# ==============================
+signal_gate:
+  # 最終判断は5段階レーティング（Buy/Overweight/Hold/Underweight/Sell）。
+  # 数値confidenceは本体に存在しないため使用しない。
+  new_entry_ratings: ["Buy", "Overweight"]      # 未保有時にBUYを許可するレーティング
+  scale_in_ratings:  ["Buy", "Overweight"]      # 保有時にINCREASEを許可するレーティング
+  decrease_ratings:  ["Underweight"]            # 保有時にDECREASEするレーティング
+  close_ratings:     ["Sell"]                   # 保有時にCLOSEするレーティング
+  # Hold は常にHOLD。上記以外は全てHOLDにフォールバック。
+  direction_change_consecutive_required: 2      # フリップフロップ防止（方向転換は連続2回必要）
+
+# ==============================
+# API実行制御
+# ==============================
+execution:
+  max_parallel_analysis: 4
+  # propagate は同期メソッドのため asyncio.to_thread で並列化する
+  # Exponential Backoff設定（Tenacityライブラリ使用）
+  retry_enabled: true
+  retry_max_attempts: 5
+  retry_wait_min_seconds: 4         # 初回待機時間
+  retry_wait_max_seconds: 60        # 最大待機時間
+  retry_multiplier: 2               # 待機時間の指数倍率
+
+# ==============================
+# TradingAgents 設定（v3.2：実在キーのみ）
+# ==============================
+tradingagents:
+  llm_provider: "openai"
+  deep_think_llm: "gpt-5.5"         # DEFAULT_CONFIG 既定値
+  quick_think_llm: "gpt-5.4-mini"  # DEFAULT_CONFIG 既定値
+  max_debate_rounds: 1
+  max_risk_discuss_rounds: 1
+  checkpoint_enabled: true          # 実在キー。クラッシュ再開を有効化
+  output_language: "Japanese"       # レポート言語（内部討論は英語のまま）

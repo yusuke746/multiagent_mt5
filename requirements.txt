@@ -1,12 +1,11 @@
-# MT5 & Windows
+# --- Core runtime ---
 MetaTrader5>=5.0.45
-pywin32>=306
+PyYAML>=6.0
 python-dotenv>=1.0.0
 requests>=2.31.0
-numpy>=1.24.0
-pandas>=2.0.0
+tenacity>=8.2.0
+tzdata>=2024.1          # Windows で zoneinfo(America/New_York) を使うため必須
 
-# TradingAgents (多エージェントLLM分析フレームワーク)
-# 初回インストール: pip install "tradingagents @ git+https://github.com/TauricResearch/TradingAgents.git"
-# または git clone 後: pip install ./TradingAgents
-tradingagents @ git+https://github.com/TauricResearch/TradingAgents.git
+# --- TradingAgents 本体（別途 clone して `pip install -e ./TradingAgents` する） ---
+# 依存（langgraph / langchain-core / pydantic 等）は TradingAgents 側の requirements に従う。
+# ここでは明示しない（バージョン競合を避けるため本体の setup に委譲）。

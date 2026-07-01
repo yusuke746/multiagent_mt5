@@ -1,29 +1,54 @@
-# === Python ===
+# =========================================================
+#  .gitignore — multiagent_mt5 (TradingAgents × XMTrading bot)
+# =========================================================
+
+# --- Secrets (絶対にコミットしない) ---
+.env
+*.env
+!.env.example
+
+# --- Third-party clone (別途 clone / pip install -e すること) ---
+TradingAgents/
+
+# --- Python ---
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
-*.pyc
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
 
-# === 仮想環境 ===
+# --- Virtual environments ---
 .venv/
 venv/
 env/
+ENV/
 
-# === 機密情報 ===
-.env
-
-# === DB / ログ ===
-*.db
-*.db-wal
-*.db-shm
-logs/
+# --- Runtime state / data (実行時に生成される) ---
+data/*.json
+data/*.db
+data/*.sqlite
+logs/*.log
+logs/*.jsonl
 *.log
 
-# === IDE ===
-.vscode/settings.json
-.idea/
-
-# === TradingAgents キャッシュ / メモリ ===
+# --- TradingAgents runtime home / checkpoints ---
 .tradingagents/
+checkpoints/
+eval_results/
+
+# --- Screenshots / caches ---
+screenshots/
+.cache/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*~
